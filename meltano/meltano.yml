@@ -1,0 +1,115 @@
+version: 1
+default_environment: dev
+project_id: 754dc7a2-b9e8-4ed7-856c-71e286d15b94
+environments:
+- name: dev
+- name: staging
+- name: prod
+
+plugins:
+
+  extractors:
+
+  - name: tap-postgres
+    variant: meltanolabs
+    pip_url: git+https://github.com/MeltanoLabs/tap-postgres.git
+    config:
+      database: northwind
+      default_replication_method: FULL_TABLE
+      user: northwind_user
+      password: thewindisblowing
+      filter_schemas:
+        - public
+
+  - name: tap-csv
+    variant: meltanolabs
+    pip_url: git+https://github.com/MeltanoLabs/tap-csv.git
+  - name: tap-csv-initial
+    inherit_from: tap-csv
+    config:
+      files:
+      - entity: order_details
+        path: /code-challenge-indicium-engdados/data/order_details.csv
+        keys:
+          - order_id
+
+  - name: tap-csv-current
+    inherit_from: tap-csv
+    config:
+      csv_files_definition: /code-challenge-indicium-engdados/data-pipeline/current_data/.temp/files_definition.json
+
+
+  loaders:
+
+  - name: target-csv
+    variant: hotgluexyz
+    pip_url:  git+https://github.com/hotgluexyz/target-csv.git
+    config:
+      destination_path: ../data-pipeline
+
+  - name: target-postgres
+    variante: meltanolabs
+    pip_url: meltanolabs-target-postgres
+    config:
+      dbname: new_northwind_output
+      host: db-2
+      port: 5433
+      user: northwind_user
+      password: thewindisblowing
+      default_target_schema: raw
+
+  utilities:
+
+  - name: organize_files
+    namespace: organize-files
+    commands:
+      organize_csv:
+        args: script/organize_csv.py
+        executable: python
+
+  - name: organize_current_data
+    namespace: organize_current_data
+    commands:
+      file_definition:
+        args: script/current_data.py
+        executable: python
+
+  - name: files_definition
+    namespace: files_definition
+    commands:
+      files_definition:
+        args: script/files_definition.py
+        executable: python
+
+  - name: airflow
+    variant: apache
+    pip_url: git+https://github.com/meltano/airflow-ext.git@main apache-airflow==2.8.1
+      --constraint
+      https://raw.githubusercontent.com/apache/airflow/constraints-2.8.1/constraints-no-providers-${MELTANO__PYTHON_VERSION}.txt
+
+jobs:
+
+- name: input-local
+  task:
+    - tap-postgres target-csv
+    - tap-csv-initil target-csv
+    - organize-files:organize_csv
+
+- name: input-postgres
+  tasks:
+    - organize_current_data:organize_data
+    - files_definition:file_definition
+    - tap-csv-current target-postgres
+
+schedules:
+- name: pipeline-1
+  interval: '@daily'
+  job: input-local
+
+- name: pipeline-2
+  interval: '@daily'
+  job: input-postgres
+
+
+
+
